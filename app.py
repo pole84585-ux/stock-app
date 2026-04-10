@@ -1,29 +1,32 @@
 import streamlit as st
-import akshare as ak
 import pandas as pd
 import numpy as np
 import requests
+import datetime
 
-st.set_page_config(page_title="V3+V4终极交易系统", layout="wide")
+st.set_page_config(page_title="V3+稳定交易系统", layout="wide")
 
-st.title("🔥 V3+V4融合终极版（信号+回测+风控）")
+st.title("🔥 V3+稳定版（资金 + 回测 + 自动交易）")
+
+# =========================
+# 读取本地数据（稳定核心🔥）
+# =========================
+try:
+    df_all = pd.read_csv("data.csv")
+except:
+    st.error("❌ 没有数据，请先运行 data_update.py")
+    st.stop()
 
 # =========================
 # 股票池
 # =========================
-stocks = ["600519", "600036", "601318", "000001", "000858", "300750"]
+stocks = df_all["code"].unique()
 
 # =========================
-# 获取历史数据
+# 获取单只股票数据
 # =========================
 def get_data(code):
-    df = ak.stock_zh_a_hist(symbol=code, period="daily", adjust="qfq")
-    df = df.tail(200)
-
-    df["ret"] = df["收盘"].pct_change()
-    df["vol"] = df["成交量"]
-    df["vol_chg"] = df["vol"].pct_change()
-
+    df = df_all[df_all["code"] == code].copy()
     return df.dropna()
 
 # =========================
@@ -34,33 +37,39 @@ def backtest(df):
 
     trades = df[df["signal"]]
 
+    if len(trades) == 0:
+        return 0, 0, 0
+
     win_rate = (trades["ret"] > 0).mean()
     avg_return = trades["ret"].mean()
 
-    # 模拟资金曲线
-    capital = 100000
-    equity = capital * (1 + trades["ret"]).cumprod()
+    equity = (1 + trades["ret"]).cumprod()
 
-    if len(equity) > 0:
-        drawdown = (equity - equity.cummax()) / equity.cummax()
-        max_dd = drawdown.min()
-    else:
-        max_dd = 0
+    drawdown = (equity - equity.cummax()) / equity.cummax()
+    max_dd = drawdown.min()
 
     return win_rate, avg_return, max_dd
 
 # =========================
-# 北向资金
+# 北向资金趋势判断🔥
 # =========================
-def north_money():
-    try:
-        df = ak.stock_hsgt_north_net_flow_in_em()
-        latest = df.iloc[-1]
-        return latest["沪深港通:北向资金:当日净流入"]
-    except:
-        return 0
+try:
+    north_df = pd.read_csv("north.csv")
 
-north = north_money()
+    flows = north_df["沪深港通:北向资金:当日净流入"].tail(3)
+
+    if all(flows > 0):
+        north_trend = "🟢 连续流入（强势）"
+    elif all(flows < 0):
+        north_trend = "🔴 连续流出（风险）"
+    else:
+        north_trend = "🟡 震荡"
+
+    north_value = flows.iloc[-1]
+
+except:
+    north_trend = "未知"
+    north_value = 0
 
 # =========================
 # 主逻辑
@@ -71,10 +80,11 @@ for s in stocks:
     try:
         df = get_data(s)
 
-        # ===== 回测 =====
+        if df.empty:
+            continue
+
         win_rate, avg_return, max_dd = backtest(df)
 
-        # ===== 当前信号 =====
         latest = df.iloc[-1]
 
         score = 0
@@ -87,7 +97,6 @@ for s in stocks:
         signal = "不做"
         position = 0
 
-        # 🔥 核心过滤（历史 + 当前）
         if score == 2 and win_rate > 0.55:
             signal = "🔥 可买（通过回测）"
             position = 0.2
@@ -103,47 +112,86 @@ for s in stocks:
             "仓位": f"{position*100:.0f}%"
         })
 
-    except:
-        continue
+    except Exception as e:
+        st.warning(f"{s} 出错: {e}")
 
 df_result = pd.DataFrame(results)
 
 # =========================
-# 输出
+# 防止空数据崩溃
+# =========================
+if df_result.empty:
+    st.error("❌ 没有可用数据")
+    st.stop()
+
+# =========================
+# 页面显示
 # =========================
 
-st.subheader("💰 北向资金")
-st.write("净流入：", north)
+st.subheader("💰 北向资金（聪明钱）")
+st.write("今日流入：", north_value)
+st.write("趋势：", north_trend)
 
 st.subheader("📊 策略验证 + 今日信号")
 st.dataframe(df_result)
 
 # =========================
-# 筛选可交易
+# 自动交易清单🔥
 # =========================
-st.subheader("🔥 今日可交易（已过滤）")
+st.subheader("🔥 今日交易清单（自动生成）")
 
-buy = df_result[df_result["信号"].str.contains("可买")]
+if "信号" in df_result.columns:
+    trade_list = df_result[
+        (df_result["信号"].str.contains("可买")) &
+        (df_result["胜率"] > 55)
+    ]
+else:
+    trade_list = pd.DataFrame()
 
-st.dataframe(buy)
+if trade_list.empty:
+    st.warning("⚠️ 今日没有符合条件的股票")
+else:
+    for _, row in trade_list.iterrows():
+        st.success(f"""
+🟢 股票：{row['股票']}
+- 胜率：{row['胜率']}%
+- 仓位：{row['仓位']}
+""")
 
 # =========================
-# 推送
+# Telegram 推送
 # =========================
 def send_telegram(msg):
     token = "YOUR_BOT_TOKEN"
     chat_id = "YOUR_CHAT_ID"
-
     url = f"https://api.telegram.org/bot{token}/sendMessage"
     requests.post(url, data={"chat_id": chat_id, "text": msg})
 
-if st.button("📡 推送今日交易"):
+# =========================
+# 自动推送（每天一次）
+# =========================
+now = datetime.datetime.now()
 
-    msg = "📊 今日交易信号（V3+V4）\n\n"
+if now.hour == 9:
+    if not trade_list.empty:
+        msg = "📊 今日交易清单\n\n"
 
-    for _, row in buy.iterrows():
-        msg += f"{row['股票']} 胜率{row['胜率']}% 仓位{row['仓位']}\n"
+        for _, row in trade_list.iterrows():
+            msg += f"{row['股票']} 胜率{row['胜率']}% 仓位{row['仓位']}\n"
 
-    send_telegram(msg)
+        send_telegram(msg)
 
-    st.success("已推送")
+# =========================
+# 手动推送按钮（备用）
+# =========================
+if st.button("📡 手动推送"):
+    if trade_list.empty:
+        st.warning("没有可推送内容")
+    else:
+        msg = "📊 今日交易清单\n\n"
+
+        for _, row in trade_list.iterrows():
+            msg += f"{row['股票']} 胜率{row['胜率']}% 仓位{row['仓位']}\n"
+
+        send_telegram(msg)
+        st.success("✅ 已推送到手机")
