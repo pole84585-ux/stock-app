@@ -17,7 +17,7 @@ if TOKEN:
     import pandas as pd
 stocks = pd.read_csv("data.csv")
 
-    def get_data(ts_code):
+def get_data(ts_code):
         df = pro.daily(ts_code=ts_code, start_date=START_DATE, end_date=END_DATE)
         df = df.sort_values("trade_date")
 
