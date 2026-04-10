@@ -14,7 +14,8 @@ if TOKEN:
     START_DATE = "20230101"
     END_DATE = datetime.today().strftime("%Y%m%d")
 
-    stocks = pro.stock_basic(exchange='', list_status='L', fields='ts_code,name,industry')
+    import pandas as pd
+stocks = pd.read_csv("data.csv")
 
     def get_data(ts_code):
         df = pro.daily(ts_code=ts_code, start_date=START_DATE, end_date=END_DATE)
