@@ -1,86 +1,40 @@
-import tushare as ts
-import pandas as pd
 import streamlit as st
-from datetime import datetime
+import pandas as pd
 
-st.title("📊 A股量化选股系统")
+st.set_page_config(page_title="A股量化选股系统", layout="wide")
 
-TOKEN = st.text_input("请输入Tushare Token", type="password")
+st.title("📊 A股量化选股系统（稳定版）")
 
-if TOKEN:
-    ts.set_token(TOKEN)
-    pro = ts.pro_api()
+# =========================
+# 读取数据
+# =========================
+df = pd.read_csv("data.csv")
 
-    START_DATE = "20230101"
-    END_DATE = datetime.today().strftime("%Y%m%d")
+df = df.dropna()
 
-    import pandas as pd
-stocks = pd.read_csv("data.csv")
+# =========================
+# 因子模型
+# =========================
+df["vol_score"] = df["vol"] / df["vol"].mean()
+df["momentum"] = df["pct"] / (abs(df["pct"].mean()) + 1e-6)
 
-def get_data(ts_code):
-        df = pro.daily(ts_code=ts_code, start_date=START_DATE, end_date=END_DATE)
-        df = df.sort_values("trade_date")
+df["score"] = (df["vol_score"] + df["momentum"]) * 50
 
-        df['MA20'] = df['close'].rolling(20).mean()
-        df['MA60'] = df['close'].rolling(60).mean()
-        df['VOL5'] = df['vol'].rolling(5).mean()
-        df['HIGH20'] = df['high'].rolling(20).max()
+# =========================
+# 排序选股
+# =========================
+result = df.sort_values("score", ascending=False).head(10)
 
-        return df
+st.subheader("🔥 今日推荐")
 
-    def score_stock(df):
-        if len(df) < 60:
-            return 0
+for _, row in result.iterrows():
+    st.markdown(f"""
+    ### {row['code']}
+    - 📊 评分：{row['score']:.2f}
+    - 💰 收盘价：{row['close']}
+    - 📦 成交量：{row['vol']}
+    - 📈 涨跌：{row['pct']}%
+    """)
 
-        latest = df.iloc[-1]
-        score = 0
-
-        if latest['MA20'] > latest['MA60']:
-            score += 30
-        if latest['close'] >= latest['HIGH20']:
-            score += 40
-        if latest['vol'] > 1.5 * latest['VOL5']:
-            score += 30
-
-        return score
-
-    if st.button("🚀 开始选股"):
-
-        results = []
-
-        for i, row in stocks.head(50).iterrows():
-            try:
-                df = get_data(row['ts_code'])
-                score = score_stock(df)
-                import time
-                time.sleep(0.5)
-
-                if score > 60:
-                    results.append({
-                        "name": row['name'],
-                        "industry": row['industry'],
-                        "score": score
-                    })
-            except:
-                continue
-
-        if results:
-            df_res = pd.DataFrame(results).sort_values(by="score", ascending=False).head(5)
-
-            st.subheader("📈 推荐股票")
-
-            for i, row in df_res.iterrows():
-                stars = "⭐" * (row['score'] // 20)
-
-                st.write(f"{row['name']}（{row['industry']}） {stars}")
-                st.write("👉 买点：突破新高 + 放量")
-                st.write("👉 止损：-5%")
-                st.write("👉 止盈：+15% / +20%")
-
-            st.subheader("🔥 热点板块")
-            hot = df_res['industry'].value_counts().head(3)
-
-            for ind in hot.index:
-                st.write(ind)
-        else:
-            st.warning("今日无信号")
+st.markdown("---")
+st.info("📌 数据来自本地 data.csv（已脱离API）")
