@@ -47,10 +47,12 @@ if TOKEN:
 
         results = []
 
-        for i, row in stocks.head(200).iterrows():
+        for i, row in stocks.head(50).iterrows():
             try:
                 df = get_data(row['ts_code'])
                 score = score_stock(df)
+                import time
+                time.sleep(0.5)
 
                 if score > 60:
                     results.append({
