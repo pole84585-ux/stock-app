@@ -1,30 +1,39 @@
-import tushare as ts
+import akshare as ak
 import pandas as pd
 
-ts.set_token("你的token")
-pro = ts.pro_api()
+stocks = ["600519", "600036", "601318", "000001", "000858", "300750"]
 
-stocks = pro.stock_basic(fields="ts_code,name,industry")
+all_data = []
 
-data = []
-
-for code in stocks['ts_code'][:300]:
+for s in stocks:
     try:
-        df = pro.daily(ts_code=code)
-        df = df.sort_values("trade_date")
+        df = ak.stock_zh_a_hist(symbol=s, period="daily", adjust="qfq")
+        df = df.tail(200)
 
-        latest = df.iloc[-1]
+        df["ret"] = df["收盘"].pct_change()
+        df["vol"] = df["成交量"]
+        df["vol_chg"] = df["vol"].pct_change()
+        df["code"] = s
 
-        data.append([
-            code,
-            latest['close'],
-            latest['vol'],
-            latest['pct_chg']
-        ])
+        all_data.append(df)
 
     except:
         continue
 
-pd.DataFrame(data, columns=["code","close","vol","pct"]).to_csv("data.csv", index=False)
+# =========================
+# 北向资金历史（新增🔥）
+# =========================
+try:
+    north = ak.stock_hsgt_north_net_flow_in_em()
+    north = north.tail(5)
+    north.to_csv("north.csv", index=False)
+except:
+    pass
 
-print("更新完成")
+# =========================
+# 保存股票数据
+# =========================
+final_df = pd.concat(all_data)
+final_df.to_csv("data.csv", index=False)
+
+print("✅ 数据更新完成")
